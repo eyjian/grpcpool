@@ -72,9 +72,14 @@ func (this *GRPCConn) IsClosed() bool {
 	return this.closed
 }
 
-// 销毁释放连接池资源
+// 销毁连接池（释放资源）
 func (this *GRPCPool) Destroy() {
 	close(this.clients)
+	clients := this.clients
+	this.clients = nil
+	for client := range clients {
+		client.Close()
+	}
 }
 
 // 从连接池取一个连接，
