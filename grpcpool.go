@@ -40,7 +40,11 @@ type GRPCPool struct {
 func NewGRPCPool(endpoint string, size int32) *GRPCPool {
 	grpcPool := new(GRPCPool)
 	grpcPool.endpoint = endpoint
-	grpcPool.size = size
+	if size < 1 {
+		grpcPool.size = 1
+	} else {
+		grpcPool.size = size
+	}
 	grpcPool.used = 0
 	grpcPool.clients = make(chan *GRPCConn, size) // 在成员函数 Destroy 中释放
 	return grpcPool
