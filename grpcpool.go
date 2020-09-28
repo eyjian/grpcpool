@@ -19,6 +19,8 @@ import (
 	"google.golang.org/grpc"
 )
 
+type Dialer func(ctx context.Context, target string) (conn *grpc.ClientConn, err error)
+
 // gRPC 连接
 type GRPCConn struct {
 	endpoint string           // 服务端的端点
@@ -33,11 +35,15 @@ type GRPCPool struct {
 	size     int32          // 连接池大小
 	used     int32          // 已用连接数
 	clients  chan *GRPCConn // gRPC 连接队列
+	dialer   Dialer
+}
+
+type PoolOption interface {
 }
 
 // 创建 gRPC 连接池，总是返回非 nil 值，
 // 注意在使用完后，应调用连接池的成员函数 Destroy 释放创建连接池时所分配的资源
-func NewGRPCPool(endpoint string, size int32) *GRPCPool {
+func NewGRPCPool(endpoint string, size int32, opts ...PoolOption) *GRPCPool {
 	grpcPool := new(GRPCPool)
 	grpcPool.endpoint = endpoint
 	if size < 1 {
@@ -47,6 +53,13 @@ func NewGRPCPool(endpoint string, size int32) *GRPCPool {
 	}
 	grpcPool.used = 0
 	grpcPool.clients = make(chan *GRPCConn, size) // 在成员函数 Destroy 中释放
+	grpcPool.dialer = nil
+	return grpcPool
+}
+
+func NewGRPCPoolEx(endpoint string, size int32, dialer Dialer, opts ...PoolOption) *GRPCPool {
+	grpcPool := NewGRPCPool(endpoint, size, opts...)
+	grpcPool.dialer = dialer
 	return grpcPool
 }
 
@@ -96,7 +109,14 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, error) {
 			used2 := atomic.AddInt32(&this.used, -1)
 			return nil, errors.New(fmt.Sprintf("pool for %s is empty (size:%d, used:%d/%d)", this.endpoint, this.size, used1, used2))
 		} else {
-			client, err := grpc.DialContext(ctx, this.endpoint, grpc.WithBlock(), grpc.WithInsecure())
+			var err error
+			var client *grpc.ClientConn
+
+			if this.dialer == nil {
+				client, err = grpc.DialContext(ctx, this.endpoint, grpc.WithBlock(), grpc.WithInsecure())
+			} else {
+				client, err = this.dialer(ctx, this.endpoint)
+			}
 			if err != nil {
 				return nil, errors.New(fmt.Sprintf("gRPC connect %s failed (%s)", this.endpoint, err.Error()))
 			} else {
