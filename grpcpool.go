@@ -25,14 +25,14 @@ type Dialer func(ctx context.Context, target string) (conn *grpc.ClientConn, err
 
 // 错误代码
 const (
-	SUCCESS      = 0
-	POOL_EMPTY   = 1 // 连接池空的
-	POOL_FULL    = 2 // 连接池已满
-	CONN_CLOSED  = 3 // 连接已关闭
-	CONN_TIMEOUT = 4 // 连接超时
-	CONN_REFUSED = 5 // 连接被拒绝
-	CONN_INPOOL  = 6 // 连接已在池中
-	GRPC_ERROR   = 7 // 其它 gRPC 错误
+	SUCCESS                = 0
+	POOL_EMPTY             = 1 // 连接池空的
+	POOL_FULL              = 2 // 连接池已满
+	CONN_CLOSED            = 3 // 连接已关闭
+	CONN_UNAVAILABLE       = 4 // 连接被拒绝
+	CONN_DEADLINE_EXCEEDED = 5 // 连接超时
+	CONN_INPOOL            = 6 // 连接已在池中
+	GRPC_ERROR             = 7 // 其它 gRPC 错误
 )
 
 // gRPC 连接
@@ -142,9 +142,9 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 				var errcode uint32
 				errInfo, _ := status.FromError(err)
 				if errInfo.Code() == codes.Unavailable {
-					errcode = CONN_REFUSED
+					errcode = CONN_UNAVAILABLE
 				} else if errInfo.Code() == codes.DeadlineExceeded {
-					errcode = CONN_TIMEOUT
+					errcode = CONN_DEADLINE_EXCEEDED
 				} else {
 					errcode = GRPC_ERROR
 				}
