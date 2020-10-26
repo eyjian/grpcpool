@@ -17,9 +17,23 @@ import (
 )
 import (
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type Dialer func(ctx context.Context, target string) (conn *grpc.ClientConn, err error)
+
+// 错误代码
+const (
+	SUCCESS      = 0
+	POOL_EMPTY   = 1 // 连接池空的
+	POOL_FULL    = 2 // 连接池已满
+	CONN_CLOSED  = 3 // 连接已关闭
+	CONN_TIMEOUT = 4 // 连接超时
+	CONN_REFUSED = 5 // 连接被拒绝
+	CONN_INPOOL  = 6 // 连接已在池中
+	GRPC_ERROR   = 7 // 其它 gRPC 错误
+)
 
 // gRPC 连接
 type GRPCConn struct {
@@ -97,17 +111,21 @@ func (this *GRPCPool) Destroy() {
 
 // 从连接池取一个连接，
 // 应和 Put 一对一成对调用
-func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, error) {
+// 返回三个值：
+// 1) GRPCConn 指针
+// 2) 错误代码
+// 3) 错误信息
+func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 	used1 := atomic.AddInt32(&this.used, 1)
 
 	select {
 	case conn := <-this.clients:
 		conn.inpool = false
-		return conn, nil
+		return conn, SUCCESS, nil
 	default:
 		if used1 > this.size {
 			used2 := atomic.AddInt32(&this.used, -1)
-			return nil, errors.New(fmt.Sprintf("pool for %s is empty (size:%d, used:%d/%d)", this.endpoint, this.size, used1, used2))
+			return nil, POOL_EMPTY, errors.New(fmt.Sprintf("pool for %s is empty (size:%d, used:%d/%d)", this.endpoint, this.size, used1, used2))
 		} else {
 			var err error
 			var client *grpc.ClientConn
@@ -121,39 +139,48 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, error) {
 				client, err = this.dialer(ctx, this.endpoint)
 			}
 			if err != nil {
-				return nil, errors.New(fmt.Sprintf("gRPC connect %s failed (%s)", this.endpoint, err.Error()))
+				var errcode uint32
+				errInfo, _ := status.FromError(err)
+				if errInfo.Code() == codes.Unavailable {
+					errcode = CONN_REFUSED
+				} else if errInfo.Code() == codes.DeadlineExceeded {
+					errcode = CONN_TIMEOUT
+				} else {
+					errcode = GRPC_ERROR
+				}
+				return nil, errcode, errors.New(fmt.Sprintf("gRPC connect %s failed (%s)", this.endpoint, err.Error()))
 			} else {
 				conn := new(GRPCConn)
 				conn.endpoint = this.endpoint
 				conn.closed = false
 				conn.inpool = false
 				conn.client = client
-				return conn, nil
+				return conn, SUCCESS, nil
 			}
 		}
 	}
 }
 
 // 连接用完后归还回池，应和 Get 一对一成对调用
-func (this *GRPCPool) Put(conn *GRPCConn) error {
+func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 	if conn.inpool {
 		// 不能完全解决重复调用，所以应保持和 Get 的一对一成对调用关系
-		return errors.New(fmt.Sprintf("gRPC connection (%s) is in pool", this.endpoint))
+		return CONN_INPOOL, errors.New(fmt.Sprintf("gRPC connection (%s) is in pool", this.endpoint))
 	} else {
 		atomic.AddInt32(&this.used, -1)
 
 		if conn.IsClosed() {
 			// 已关闭的不再放回池
-			return nil
+			return CONN_CLOSED, nil
 		} else {
 			select {
 			case this.clients <- conn:
 				conn.inpool = true
-				return nil
+				return SUCCESS, nil
 			default:
 				conn.inpool = false
 				conn.Close()
-				return errors.New(fmt.Sprintf("pool for %s is full(%d)", this.endpoint, this.size))
+				return POOL_FULL, errors.New(fmt.Sprintf("pool for %s is full(%d)", this.endpoint, this.size))
 			}
 		}
 	}
