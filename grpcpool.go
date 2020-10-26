@@ -21,8 +21,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type Dialer func(ctx context.Context, target string) (conn *grpc.ClientConn, err error)
-
 // 错误代码
 const (
 	SUCCESS     = 0
@@ -60,12 +58,13 @@ type GRPCPool struct {
 	size     int32          // 连接池大小
 	used     int32          // 已用连接数
 	clients  chan *GRPCConn // gRPC 连接队列
-	dialer   Dialer
+	dialOpts []grpc.DialOption
 }
 
 // 创建 gRPC 连接池，总是返回非 nil 值，
 // 注意在使用完后，应调用连接池的成员函数 Destroy 释放创建连接池时所分配的资源
-func NewGRPCPool(endpoint string, size int32) *GRPCPool {
+// 如果不指定参数 dialOpts，则默认为 grpc.WithBlock() 和 grpc.WithInsecure()。
+func NewGRPCPool(endpoint string, size int32, dialOpts ...grpc.DialOption) *GRPCPool {
 	grpcPool := new(GRPCPool)
 	grpcPool.endpoint = endpoint
 	if size < 1 {
@@ -75,13 +74,21 @@ func NewGRPCPool(endpoint string, size int32) *GRPCPool {
 	}
 	grpcPool.used = 0
 	grpcPool.clients = make(chan *GRPCConn, size) // 在成员函数 Destroy 中释放
-	grpcPool.dialer = nil
-	return grpcPool
-}
-
-func NewGRPCPoolEx(endpoint string, size int32, dialer Dialer) *GRPCPool {
-	grpcPool := NewGRPCPool(endpoint, size)
-	grpcPool.dialer = dialer
+	grpcPool.dialOpts = make([]grpc.DialOption, len(dialOpts))
+	if len(dialOpts) > 0 {
+		grpcPool.dialOpts = dialOpts
+	} else {
+		// opts 常用可取值：
+		// grpc.WithDisableHealthCheck()
+		// grpc.WithDisableRetry()
+		// grpc.WithDisableServiceConfig()
+		// grpc.WithDefaultServiceConfig()
+		// grpc.WithDefaultCallOptions()
+		// grpc.WithResolvers()
+		// grpc.WithAuthority()
+		grpcPool.dialOpts = append(grpcPool.dialOpts, grpc.WithBlock())
+		grpcPool.dialOpts = append(grpcPool.dialOpts, grpc.WithInsecure())
+	}
 	return grpcPool
 }
 
@@ -141,16 +148,7 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 			// 常见错误：
 			// 1) transport: Error while dialing dial tcp 127.0.0.1:3121: connect: connection refused
 			// 2) gRPC connect 127.0.0.1:3121 failed (context deadline exceeded)
-			if this.dialer == nil {
-				// grpc.WithDisableHealthCheck()
-				// grpc.WithDisableRetry()
-				// grpc.WithDisableServiceConfig()
-				// grpc.WithDefaultServiceConfig()
-				// grpc.WithDefaultCallOptions()
-				client, err = grpc.DialContext(ctx, this.endpoint, grpc.WithBlock(), grpc.WithInsecure())
-			} else {
-				client, err = this.dialer(ctx, this.endpoint)
-			}
+			client, err = grpc.DialContext(ctx, this.endpoint, this.dialOpts[0:]...)
 			if err != nil {
 				var errcode uint32
 				errInfo, _ := status.FromError(err)
