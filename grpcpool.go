@@ -63,12 +63,9 @@ type GRPCPool struct {
 	dialer   Dialer
 }
 
-type PoolOption interface {
-}
-
 // 创建 gRPC 连接池，总是返回非 nil 值，
 // 注意在使用完后，应调用连接池的成员函数 Destroy 释放创建连接池时所分配的资源
-func NewGRPCPool(endpoint string, size int32, opts ...PoolOption) *GRPCPool {
+func NewGRPCPool(endpoint string, size int32) *GRPCPool {
 	grpcPool := new(GRPCPool)
 	grpcPool.endpoint = endpoint
 	if size < 1 {
@@ -82,8 +79,8 @@ func NewGRPCPool(endpoint string, size int32, opts ...PoolOption) *GRPCPool {
 	return grpcPool
 }
 
-func NewGRPCPoolEx(endpoint string, size int32, dialer Dialer, opts ...PoolOption) *GRPCPool {
-	grpcPool := NewGRPCPool(endpoint, size, opts...)
+func NewGRPCPoolEx(endpoint string, size int32, dialer Dialer) *GRPCPool {
+	grpcPool := NewGRPCPool(endpoint, size)
 	grpcPool.dialer = dialer
 	return grpcPool
 }
