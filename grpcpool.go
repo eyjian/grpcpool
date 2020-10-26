@@ -25,14 +25,25 @@ type Dialer func(ctx context.Context, target string) (conn *grpc.ClientConn, err
 
 // 错误代码
 const (
-	SUCCESS                = 0
-	POOL_EMPTY             = 1 // 连接池空的
-	POOL_FULL              = 2 // 连接池已满
-	CONN_CLOSED            = 3 // 连接已关闭
-	CONN_UNAVAILABLE       = 4 // 连接被拒绝
-	CONN_DEADLINE_EXCEEDED = 5 // 连接超时
-	CONN_INPOOL            = 6 // 连接已在池中
-	GRPC_ERROR             = 7 // 其它 gRPC 错误
+	SUCCESS     = 0
+	POOL_EMPTY  = 1 // 连接池空的
+	POOL_FULL   = 2 // 连接池已满
+	GRPC_ERROR  = 3 // 其它 gRPC 错误
+	CONN_CLOSED = 4 // 连接已关闭
+	CONN_INPOOL = 5 // 连接已在池中
+
+	// Unavailable indicates the service is currently unavailable.
+	// This is a most likely a transient condition and may be corrected
+	// by retrying with a backoff. Note that it is not always safe to retry
+	// non-idempotent operations.
+	CONN_UNAVAILABLE = 6 // 连接被拒绝
+
+	// DeadlineExceeded means operation expired before completion.
+	// For operations that change the state of the system, this error may be
+	// returned even if the operation has completed successfully. For
+	// example, a successful response from a server could have been delayed
+	// long enough for the deadline to expire.
+	CONN_DEADLINE_EXCEEDED = 7 // 连接超时
 )
 
 // gRPC 连接
