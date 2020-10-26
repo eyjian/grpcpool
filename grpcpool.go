@@ -142,6 +142,11 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 			// 1) transport: Error while dialing dial tcp 127.0.0.1:3121: connect: connection refused
 			// 2) gRPC connect 127.0.0.1:3121 failed (context deadline exceeded)
 			if this.dialer == nil {
+				// grpc.WithDisableHealthCheck()
+				// grpc.WithDisableRetry()
+				// grpc.WithDisableServiceConfig()
+				// grpc.WithDefaultServiceConfig()
+				// grpc.WithDefaultCallOptions()
 				client, err = grpc.DialContext(ctx, this.endpoint, grpc.WithBlock(), grpc.WithInsecure())
 			} else {
 				client, err = this.dialer(ctx, this.endpoint)
