@@ -159,7 +159,8 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 				} else {
 					errcode = GRPC_ERROR
 				}
-				return nil, errcode, errors.New(fmt.Sprintf("gRPC connect %s failed (%s)", this.endpoint, err.Error()))
+        used2 := atomic.AddInt32(&this.used, -1)
+				return nil, errcode, errors.New(fmt.Sprintf("gRPC connect %s failed (used:%d/%d, %s)", this.endpoint, this.size, used2, err.Error()))
 			} else {
 				conn := new(GRPCConn)
 				conn.endpoint = this.endpoint
