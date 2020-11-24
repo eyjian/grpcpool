@@ -205,14 +205,16 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 			if used > this.GetInitSize() {
 				now := time.Now()
 
-				utime := conn.utime.Add(time.Second*10)
+				utime := conn.utime
+				utime.Add(time.Second*10)
 				if utime.After(now) {
 					// 空闲下来，释放掉超出 idle 部分的连接
 					conn.Close()
 					return POOL_IDLE, nil
 				}
 				if used > this.GetIdleSize() {
-					utime := conn.utime.Add (time.Second*1)
+					utime := conn.utime
+					utime.Add (time.Second*1)
 					if utime.After(now) {
 						// 空闲下来，释放掉超出 idle 部分的连接
 						conn.Close()
