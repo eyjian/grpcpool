@@ -63,6 +63,7 @@ type GRPCPool struct {
 	idleSize int32          // 连接池较繁忙连接数
 	initSize int32          // 连接池初始连接数
 	used     int32          // 已用连接数
+	idle     int32          // 空闲连接数（即在 clients 中的连接数）
 	clients  chan *GRPCConn // gRPC 连接队列
 	dialOpts []grpc.DialOption
 }
@@ -80,13 +81,14 @@ func NewGRPCPool(endpoint string, initSize, idleSize, peakSize int32, dialOpts .
 	}
 	grpcPool.idleSize = idleSize
 	if grpcPool.idleSize < grpcPool.initSize {
-		grpcPool.idleSize = grpcPool.initSize + 1
+		grpcPool.idleSize = grpcPool.initSize
 	}
 	grpcPool.peakSize = peakSize
 	if grpcPool.peakSize < grpcPool.idleSize {
-		grpcPool.peakSize = grpcPool.idleSize + 1
+		grpcPool.peakSize = grpcPool.idleSize
 	}
 	grpcPool.used = 0
+	grpcPool.idle = 0
 	grpcPool.clients = make(chan *GRPCConn, grpcPool.peakSize) // 在成员函数 Destroy 中释放
 	grpcPool.dialOpts = make([]grpc.DialOption, len(dialOpts))
 	if len(dialOpts) > 0 {
@@ -150,7 +152,7 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 	select {
 	case conn := <-this.clients:
 		conn.inpool = false
-		conn.utime = time.Now()
+		this.subIdle()
 		return conn, SUCCESS, nil
 	default:
 		if used1 > this.GetPeakSize() {
@@ -195,43 +197,47 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 	if conn.inpool {
 		// 不能完全解决重复调用，所以应保持和 Get 的一对一成对调用关系
 		return CONN_INPOOL, errors.New(fmt.Sprintf("gRPC connection (%s) is in pool (used:%d, init:%d, idle:%d, peak:%d)", this.endpoint, this.GetUsed(), this.GetInitSize(), this.GetIdleSize(), this.GetPeakSize()))
+	}
+
+	used := this.subUsed()
+	if conn.IsClosed() {
+		// 已关闭的不再放回池
+		return CONN_CLOSED, nil
 	} else {
-		used := this.subUsed()
+		idle := this.addIdle()
+		utime := conn.utime.Unix()
+		conn.utime = time.Now()
 
-		if conn.IsClosed() {
-			// 已关闭的不再放回池
-			return CONN_CLOSED, nil
-		} else {
-			if used > this.GetInitSize() {
-				now := time.Now()
+		if idle > this.GetInitSize() {
+			now := time.Now().Unix()
 
-				utime := conn.utime
-				utime.Add(time.Second*10)
-				if utime.After(now) {
-					// 空闲下来，释放掉超出 idle 部分的连接
+			if now > utime {
+				itime := now - utime // idle time
+				if itime > 10 {
+					conn.inpool = false
 					conn.Close()
+					this.subIdle()
 					return POOL_IDLE, nil
 				}
-				if used > this.GetIdleSize() {
-					utime := conn.utime
-					utime.Add (time.Second*1)
-					if utime.After(now) {
-						// 空闲下来，释放掉超出 idle 部分的连接
+				if idle > this.GetIdleSize() {
+					if itime > 1 {
+						conn.inpool = false
 						conn.Close()
+						this.subIdle()
 						return POOL_IDLE, nil
 					}
 				}
 			}
-
-			select {
-			case this.clients <- conn:
-				conn.inpool = true
-				return SUCCESS, nil
-			default:
-				conn.inpool = false
-				conn.Close()
-				return POOL_FULL, errors.New(fmt.Sprintf("pool for %s is full(used:%d, init:%d, idle:%d, peak:%d)", this.endpoint, used, this.GetInitSize(), this.GetIdleSize(), this.GetPeakSize()))
-			}
+		}
+		select {
+		case this.clients <- conn:
+			conn.inpool = true
+			return SUCCESS, nil
+		default:
+			conn.inpool = false
+			conn.Close()
+			this.subIdle()
+			return POOL_FULL, errors.New(fmt.Sprintf("pool for %s is full(used:%d, init:%d, idle:%d, peak:%d)", this.endpoint, used, this.GetInitSize(), this.GetIdleSize(), this.GetPeakSize()))
 		}
 	}
 }
@@ -242,6 +248,22 @@ func (this *GRPCPool) addUsed() int32 {
 
 func (this *GRPCPool) subUsed() int32 {
 	return atomic.AddInt32(&this.used, -1)
+}
+
+func (this *GRPCPool) getUsed() int32 {
+	return atomic.LoadInt32(&this.used)
+}
+
+func (this *GRPCPool) addIdle() int32 {
+	return atomic.AddInt32(&this.idle, 1)
+}
+
+func (this *GRPCPool) subIdle() int32 {
+	return atomic.AddInt32(&this.idle, -1)
+}
+
+func (this *GRPCPool) getIdle() int32 {
+	return atomic.LoadInt32(&this.idle)
 }
 
 func (this *GRPCPool) GetUsed() int32 {
