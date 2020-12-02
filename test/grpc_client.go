@@ -23,13 +23,15 @@ var (
 
     numRequests = flag.Uint("n", 1, "Number of requests to perform.")
     numConcurrency = flag.Uint("c", 1, "Number of multiple requests to make at a time.")
+    tick = flag.Uint("tick", 10000, "Tick number to print.")
 )
 var (
     gRPCPool *grpcpool.GRPCPool
     wg sync.WaitGroup
     numPendingRequests int32 // 未完成的请求数
     numFinishRequests int32 // 完成的请求数
-    numFailedRequests int32 // 请求失败数
+    numCallFailedRequests int32 // 调用失败数
+    numPoolFailedRequests int32 // 取池失败数
 )
 
 func main() {
@@ -46,7 +48,7 @@ func main() {
     }
 
     gRPCPool = grpcpool.NewGRPCPool(*server, int32(*initSize), int32(*idleSize), int32(*peakSize))
-    atomic.AddInt32(&numPendingRequests, int32(*numRequests))
+    numPendingRequests = int32(*numRequests)
     wg.Add(int(*numConcurrency))
     startTime := time.Now()
     for i:=0; i<int(*numConcurrency); i++ {
@@ -57,9 +59,9 @@ func main() {
     s := int(consumeDuration.Seconds())
     if s > 0 {
         qps := int(numFinishRequests) / s
-        fmt.Printf("QPS: %d (Num: %d, Seconds: %d, Failed: %d)\n", qps, numFinishRequests, s, numFailedRequests)
+        fmt.Printf("QPS: %d (Num: %d, Seconds: %d, PoolFailed: %d, CallFailed: %d)\n", qps, numFinishRequests, s, numPoolFailedRequests, numCallFailedRequests)
     } else {
-        fmt.Printf("QPS: %d (Num: %d, Seconds: %d, Failed: %d) *\n", 0, numFinishRequests, s, numFailedRequests)
+        fmt.Printf("QPS: %d (Num: %d, Seconds: %d, PoolFailed: %d, CallFailed: %d) *\n", 0, numFinishRequests, s, numPoolFailedRequests, numCallFailedRequests)
     }
 }
 
@@ -71,13 +73,13 @@ func requestCoroutine(index int) {
         if n < 0 {
             break
         }
-        atomic.AddInt32(&numFinishRequests, 1)
+        finishRequests := atomic.AddInt32(&numFinishRequests, 1)
         ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Second))
         defer cancel()
 
         gRPCConn, errcode, err := gRPCPool.Get(ctx)
         if err != nil {
-            atomic.AddInt32(&numFailedRequests, 1)
+            atomic.AddInt32(&numPoolFailedRequests, 1)
             fmt.Printf("Get a gRPC connection from pool failed: (%d)%s\n", errcode, err.Error())
         } else {
             grpcClient := gRPCConn.GetClient()
@@ -88,18 +90,38 @@ func requestCoroutine(index int) {
             res, err := helloClient.Hello(ctx, &in)
             if err != nil {
                 gRPCConn.Close()
-                atomic.AddInt32(&numFailedRequests, 1)
+                atomic.AddInt32(&numCallFailedRequests, 1)
                 if index == 0 {
                     fmt.Println(err)
                 }
             } else {
                 gRPCPool.Put(gRPCConn)
-                if index == 0 && i%10000 == 0 {
+                if needTick(finishRequests) {
                     used := gRPCPool.GetUsed()
                     idle := gRPCPool.GetIdle()
-                    fmt.Printf("(used:%d, idle:%d) %s\n", used, idle, res.Text)
+                    fmt.Printf("(used:%d, idle:%d, finish:%d, poolfailed:%d, callfailed:%d) %s\n", used, idle, finishRequests, numPoolFailedRequests, numCallFailedRequests, res.Text)
                 }
             }
         }
     }
+}
+
+func needTick(n int32) bool {
+    var need bool
+
+    if *tick <= 0 {
+        if n % 10000 == 0 {
+            need = true
+        } else {
+            need = false
+        }
+    } else {
+        if n % int32(*tick) == 0 {
+            need = true
+        } else {
+            need = false
+        }
+    }
+
+    return need
 }
