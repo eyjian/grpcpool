@@ -90,6 +90,7 @@ func requestCoroutine(index int) {
             res, err := helloClient.Hello(ctx, &in)
             if err != nil {
                 gRPCConn.Close()
+                gRPCPool.Put(gRPCConn)
                 atomic.AddInt32(&numCallFailedRequests, 1)
                 if index == 0 {
                     fmt.Println(err)
