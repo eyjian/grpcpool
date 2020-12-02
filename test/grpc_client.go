@@ -95,7 +95,9 @@ func requestCoroutine(index int) {
             } else {
                 gRPCPool.Put(gRPCConn)
                 if index == 0 && i%10000 == 0 {
-                    fmt.Printf("%s\n", res.Text)
+                    used := gRPCPool.GetUsed()
+                    idle := gRPCPool.GetIdle()
+                    fmt.Printf("(used:%d, idle:%d) %s\n", used, idle, res.Text)
                 }
             }
         }

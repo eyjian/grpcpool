@@ -237,10 +237,6 @@ func (this *GRPCPool) subUsed() int32 {
 	return atomic.AddInt32(&this.used, -1)
 }
 
-func (this *GRPCPool) getUsed() int32 {
-	return atomic.LoadInt32(&this.used)
-}
-
 func (this *GRPCPool) addIdle() int32 {
 	return atomic.AddInt32(&this.idle, 1)
 }
@@ -249,7 +245,7 @@ func (this *GRPCPool) subIdle() int32 {
 	return atomic.AddInt32(&this.idle, -1)
 }
 
-func (this *GRPCPool) getIdle() int32 {
+func (this *GRPCPool) GetIdle() int32 {
 	return atomic.LoadInt32(&this.idle)
 }
 
