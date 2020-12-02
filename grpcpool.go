@@ -30,7 +30,6 @@ const (
 	POOL_IDLE   = 3 // 连接池空闲了
 	GRPC_ERROR  = 4 // 其它 gRPC 错误
 	CONN_CLOSED = 5 // 连接已关闭
-	CONN_INPOOL = 6 // 连接已在池中
 
 	// Unavailable indicates the service is currently unavailable.
 	// This is a most likely a transient condition and may be corrected
@@ -51,7 +50,6 @@ const (
 type GRPCConn struct {
 	endpoint string           // 服务端的端点
 	closed   bool             // 为 true 表示已被关闭，这种状态的不能再使用和放回池
-	inpool   bool             // 如果为 true 表示在池中
 	client   *grpc.ClientConn // gRPC 连接
 	utime    time.Time        // 最近使用时间
 }
@@ -151,7 +149,6 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 
 	select {
 	case conn := <-this.clients:
-		conn.inpool = false
 		this.subIdle()
 		return conn, SUCCESS, nil
 	default:
@@ -182,7 +179,6 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 				conn := new(GRPCConn)
 				conn.endpoint = this.endpoint
 				conn.closed = false
-				conn.inpool = false
 				conn.client = client
 				conn.utime = time.Now()
 				return conn, SUCCESS, nil
@@ -194,11 +190,6 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 // 连接用完后归还回池，应和 Get 一对一成对调用
 // 约束：同一 conn 不应同时被多个协程使用
 func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
-	if conn.inpool {
-		// 不能完全解决重复调用，所以应保持和 Get 的一对一成对调用关系
-		return CONN_INPOOL, errors.New(fmt.Sprintf("gRPC connection (%s) is in pool (used:%d, init:%d, idle:%d, peak:%d)", this.endpoint, this.GetUsed(), this.GetInitSize(), this.GetIdleSize(), this.GetPeakSize()))
-	}
-
 	used := this.subUsed()
 	if conn.IsClosed() {
 		// 已关闭的不再放回池
@@ -214,14 +205,12 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 			if now > utime {
 				itime := now - utime // idle time
 				if itime > 10 {
-					conn.inpool = false
 					conn.Close()
 					this.subIdle()
 					return POOL_IDLE, nil
 				}
 				if idle > this.GetIdleSize() {
 					if itime > 1 {
-						conn.inpool = false
 						conn.Close()
 						this.subIdle()
 						return POOL_IDLE, nil
@@ -231,10 +220,8 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 		}
 		select {
 		case this.clients <- conn:
-			conn.inpool = true
 			return SUCCESS, nil
 		default:
-			conn.inpool = false
 			conn.Close()
 			this.subIdle()
 			return POOL_FULL, errors.New(fmt.Sprintf("pool for %s is full(used:%d, init:%d, idle:%d, peak:%d)", this.endpoint, used, this.GetInitSize(), this.GetIdleSize(), this.GetPeakSize()))
