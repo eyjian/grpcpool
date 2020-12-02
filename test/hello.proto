@@ -1,0 +1,18 @@
+// Writed by yijian on 2020/12/02
+syntax = "proto3";
+package main;
+
+// 请求
+message HelloReq {
+    string text = 1; // 问候内容
+}
+
+// 响应
+message HelloRes {
+    string text = 1; // 响应内容
+}
+
+service HelloService {
+    // 问候
+    rpc Hello(HelloReq) returns (HelloRes) {}
+}
