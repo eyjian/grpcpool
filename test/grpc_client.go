@@ -66,6 +66,7 @@ func main() {
     // 等待结束
     wg.Wait()
     stopChan <-true
+    close(stopChan)
     consumeDuration := time.Since(startTime)
     s := int(consumeDuration.Seconds())
     if s > 0 {
