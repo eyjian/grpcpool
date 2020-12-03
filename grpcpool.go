@@ -66,6 +66,54 @@ type GRPCPool struct {
 	dialOpts []grpc.DialOption
 }
 
+// 方便 MetricObserver 使用
+type Metric struct {
+	Used int32 // 被使用连接数（不在池中数）
+	Idle int32 // 空闲数连接（在池中数）
+
+	DialRefused int32 // gRPC 拨号拒绝数
+	DialTimeout int32 // gRPC 拨号超时数
+	DialSuccess int32 // gRPC 拨号成功数
+	DialError int32 // gRPC 拨号出错数
+
+	GetSuccess int32 // 取池成功数
+	GetEmpty int32 // 取池空数
+	PutSuccess int32 // 还池成功数
+	PutFull int32 // 还池满数
+	PutClose int32 // 还池已关闭连接数
+	PutOld int32 // 还池空闲数（长时间未使用的）
+	PutIdle int32 // 还池空闲数（近期未使用的）
+}
+
+// 度量数据观察者，方便外部获取连接数等
+type MetricObserver interface {
+	DecUsed() // 被使用连接数减一（不在池中数）
+	DecIdle() // 空闲数连接减一（在池中数）
+	IncUsed() // 被使用数增一（不在池中数）
+	IncIdle() // 空闲数增一（在池中数）
+
+	IncDialRefused() // gRPC 拨号拒绝数增一
+	IncDialTimeout() // gRPC 拨号超时数增一
+	IncDialSuccess() // gRPC 拨号成功数增一
+	IncDialError() // gRPC 拨号出错数增一（不包含拨号超时数和拒绝数）
+
+	IncGetSuccess() // 取池成功数增一（不包含新拨号的成功数）
+	IncGetEmpty() // 取池空数增一
+	IncPutSuccess() // 还池成功数增一
+	IncPutFull() // 还池满数增一
+	IncPutClose() // 还池已关闭连接数增一
+	IncPutOld() // 还池空闲数增一（长时间未使用的）
+	IncPutIdle() // 还池空闲数增一（近期未使用的）
+}
+
+func RegisterMetricObserver(mo MetricObserver) {
+	metricObserver = mo
+}
+
+var (
+	metricObserver MetricObserver
+)
+
 // 创建 gRPC 连接池，总是返回非 nil 值，
 // 注意在使用完后，应调用连接池的成员函数 Destroy 释放创建连接池时所分配的资源
 // 如果不指定参数 dialOpts，则默认为 grpc.WithBlock() 和 grpc.WithInsecure()。
@@ -150,10 +198,16 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 	select {
 	case conn := <-this.clients:
 		this.subIdle()
+		if metricObserver != nil {
+			metricObserver.IncGetSuccess()
+		}
 		return conn, SUCCESS, nil
 	default:
 		if used1 > this.GetPeakSize() {
 			used2 := this.subUsed()
+			if metricObserver != nil {
+				metricObserver.IncGetEmpty()
+			}
 			return nil, POOL_EMPTY, errors.New(fmt.Sprintf("pool for %s is empty (used:%d/%d, init:%d, idle:%d, peak:%d)", this.endpoint, used1, used2, this.GetInitSize(), this.GetIdleSize(), this.GetPeakSize()))
 		} else {
 			var err error
@@ -168,10 +222,19 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 				errInfo, _ := status.FromError(err)
 				if errInfo.Code() == codes.Unavailable {
 					errcode = CONN_UNAVAILABLE
+					if metricObserver != nil {
+						metricObserver.IncDialRefused()
+					}
 				} else if errInfo.Code() == codes.DeadlineExceeded {
 					errcode = CONN_DEADLINE_EXCEEDED
+					if metricObserver != nil {
+						metricObserver.IncDialTimeout()
+					}
 				} else {
 					errcode = GRPC_ERROR
+					if metricObserver != nil {
+						metricObserver.IncDialError()
+					}
 				}
 				used2 := this.subUsed()
 				return nil, errcode, errors.New(fmt.Sprintf("gRPC connect %s failed (used:%d, init:%d, idle:%d, peak:%d, %s)", this.endpoint, used2, this.GetInitSize(), this.GetIdleSize(), this.GetPeakSize(), err.Error()))
@@ -181,6 +244,9 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 				conn.closed = false
 				conn.client = client
 				conn.utime = time.Now()
+				if metricObserver != nil {
+					metricObserver.IncDialSuccess()
+				}
 				return conn, SUCCESS, nil
 			}
 		}
@@ -193,6 +259,9 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 	used := this.subUsed()
 	if conn.IsClosed() {
 		// 已关闭的不再放回池
+		if metricObserver != nil {
+			metricObserver.IncPutClose()
+		}
 		return CONN_CLOSED, nil
 	} else {
 		idle := this.addIdle()
@@ -207,12 +276,18 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 				if itime > 10 {
 					conn.Close()
 					this.subIdle()
+					if metricObserver != nil {
+						metricObserver.IncPutOld()
+					}
 					return POOL_IDLE, nil
 				}
 				if idle > this.GetIdleSize() {
 					if itime > 1 {
 						conn.Close()
 						this.subIdle()
+						if metricObserver != nil {
+							metricObserver.IncPutIdle()
+						}
 						return POOL_IDLE, nil
 					}
 				}
@@ -220,28 +295,46 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 		}
 		select {
 		case this.clients <- conn:
+			if metricObserver != nil {
+				metricObserver.IncPutSuccess()
+			}
 			return SUCCESS, nil
 		default:
 			conn.Close()
 			this.subIdle()
+			if metricObserver != nil {
+				metricObserver.IncPutFull()
+			}
 			return POOL_FULL, errors.New(fmt.Sprintf("pool for %s is full(used:%d, init:%d, idle:%d, peak:%d)", this.endpoint, used, this.GetInitSize(), this.GetIdleSize(), this.GetPeakSize()))
 		}
 	}
 }
 
 func (this *GRPCPool) addUsed() int32 {
+	if metricObserver != nil {
+		metricObserver.IncUsed()
+	}
 	return atomic.AddInt32(&this.used, 1)
 }
 
 func (this *GRPCPool) subUsed() int32 {
+	if metricObserver != nil {
+		metricObserver.DecUsed()
+	}
 	return atomic.AddInt32(&this.used, -1)
 }
 
 func (this *GRPCPool) addIdle() int32 {
+	if metricObserver != nil {
+		metricObserver.IncIdle()
+	}
 	return atomic.AddInt32(&this.idle, 1)
 }
 
 func (this *GRPCPool) subIdle() int32 {
+	if metricObserver != nil {
+		metricObserver.DecIdle()
+	}
 	return atomic.AddInt32(&this.idle, -1)
 }
 
