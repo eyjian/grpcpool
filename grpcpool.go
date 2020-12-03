@@ -106,6 +106,14 @@ type MetricObserver interface {
 	IncPutIdle() int32 // 还池空闲数增一（近期未使用的）
 }
 
+// 对接口 MetricObserver 的默认实现
+type DefaultMetricObserver struct {
+	metric Metric
+}
+
+// Example:
+// var defaultMetricObserver grpcpool.DefaultMetricObserver
+// grpcpool.RegisterMetricObserver(defaultMetricObserver)
 func RegisterMetricObserver(mo MetricObserver) {
 	metricObserver = mo
 }
@@ -356,4 +364,119 @@ func (this *GRPCPool) GetIdleSize() int32 {
 
 func (this *GRPCPool) GetPeakSize() int32 {
 	return this.peakSize
+}
+
+// DefaultMetricObserver
+
+func (this *DefaultMetricObserver) GetUsed() int32 {
+	return atomic.LoadInt32(&this.metric.Used)
+}
+
+func (this *DefaultMetricObserver) GetIdle() int32 {
+	return atomic.LoadInt32(&this.metric.Idle)
+}
+
+func (this *DefaultMetricObserver) DecUsed() int32 {
+	return atomic.AddInt32(&this.metric.Used, -1)
+}
+
+func (this *DefaultMetricObserver) DecIdle() int32 {
+	return atomic.AddInt32(&this.metric.Idle, -1)
+}
+
+func (this *DefaultMetricObserver) IncUsed() int32 {
+	return atomic.AddInt32(&this.metric.Used, 1)
+}
+
+func (this *DefaultMetricObserver) IncIdle() int32 {
+	return atomic.AddInt32(&this.metric.Idle, 1)
+}
+
+func (this *DefaultMetricObserver) IncDialRefused() int32 {
+	return atomic.AddInt32(&this.metric.DialRefused, 1)
+}
+
+func (this *DefaultMetricObserver) IncDialTimeout() int32 {
+	return atomic.AddInt32(&this.metric.DialTimeout, 1)
+}
+
+func (this *DefaultMetricObserver) IncDialSuccess() int32 {
+	return atomic.AddInt32(&this.metric.DialSuccess, 1)
+}
+
+func (this *DefaultMetricObserver) IncDialError() int32 {
+	return atomic.AddInt32(&this.metric.DialError, 1)
+}
+
+func (this *DefaultMetricObserver) IncGetSuccess() int32 {
+	return atomic.AddInt32(&this.metric.GetSuccess, 1)
+}
+
+func (this *DefaultMetricObserver) IncGetEmpty() int32 {
+	return atomic.AddInt32(&this.metric.GetEmpty, 1)
+}
+
+func (this *DefaultMetricObserver) IncPutSuccess() int32 {
+	return atomic.AddInt32(&this.metric.PutSuccess, 1)
+}
+
+func (this *DefaultMetricObserver) IncPutFull() int32 {
+	return atomic.AddInt32(&this.metric.PutFull, 1)
+}
+
+func (this *DefaultMetricObserver) IncPutClose() int32 {
+	return atomic.AddInt32(&this.metric.PutClose, 1)
+}
+
+func (this *DefaultMetricObserver) IncPutOld() int32 {
+	return atomic.AddInt32(&this.metric.PutOld, 1)
+}
+
+func (this *DefaultMetricObserver) IncPutIdle() int32 {
+	return atomic.AddInt32(&this.metric.PutIdle, 1)
+}
+
+// 返回清 0 前的值
+func (this *DefaultMetricObserver) ZeroDialRefused() int32 {
+	return atomic.SwapInt32(&this.metric.DialRefused, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroDialTimeout() int32 {
+	return atomic.SwapInt32(&this.metric.DialTimeout, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroDialSuccess() int32 {
+	return atomic.SwapInt32(&this.metric.DialSuccess, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroDialError() int32 {
+	return atomic.SwapInt32(&this.metric.DialError, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroGetSuccess() int32 {
+	return atomic.SwapInt32(&this.metric.GetSuccess, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroGetEmpty() int32 {
+	return atomic.SwapInt32(&this.metric.GetEmpty, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroPutSuccess() int32 {
+	return atomic.SwapInt32(&this.metric.PutSuccess, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroPutFull() int32 {
+	return atomic.SwapInt32(&this.metric.PutFull, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroPutClose() int32 {
+	return atomic.SwapInt32(&this.metric.PutClose, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroPutOld() int32 {
+	return atomic.SwapInt32(&this.metric.PutOld, 0)
+}
+
+func (this *DefaultMetricObserver) ZeroPutIdle() int32 {
+	return atomic.SwapInt32(&this.metric.PutIdle, 0)
 }
