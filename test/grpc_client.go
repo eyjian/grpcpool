@@ -80,34 +80,38 @@ func requestCoroutine(index int) {
             break
         }
         finishRequests := atomic.AddInt32(&numFinishRequests, 1)
-        ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Second))
-        defer cancel()
+        request(index, finishRequests)
+    }
+}
 
-        gRPCConn, errcode, err := gRPCPool.Get(ctx)
+func request(index int, finishRequests int32) {
+    ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Second))
+    defer cancel()
+
+    gRPCConn, errcode, err := gRPCPool.Get(ctx)
+    if err != nil {
+        atomic.AddInt32(&numPoolFailedRequests, 1)
+        fmt.Printf("Get a gRPC connection from pool failed: (%d)%s\n", errcode, err.Error())
+    } else {
+        grpcClient := gRPCConn.GetClient()
+        helloClient := NewHelloServiceClient(grpcClient)
+        in := HelloReq {
+            Text: "Hello",
+        }
+        res, err := helloClient.Hello(ctx, &in)
         if err != nil {
-            atomic.AddInt32(&numPoolFailedRequests, 1)
-            fmt.Printf("Get a gRPC connection from pool failed: (%d)%s\n", errcode, err.Error())
-        } else {
-            grpcClient := gRPCConn.GetClient()
-            helloClient := NewHelloServiceClient(grpcClient)
-            in := HelloReq {
-                Text: "Hello",
+            gRPCConn.Close()
+            gRPCPool.Put(gRPCConn)
+            atomic.AddInt32(&numCallFailedRequests, 1)
+            if index == 0 {
+                fmt.Println(err)
             }
-            res, err := helloClient.Hello(ctx, &in)
-            if err != nil {
-                gRPCConn.Close()
-                gRPCPool.Put(gRPCConn)
-                atomic.AddInt32(&numCallFailedRequests, 1)
-                if index == 0 {
-                    fmt.Println(err)
-                }
-            } else {
-                gRPCPool.Put(gRPCConn)
-                if needTick(finishRequests) {
-                    used := gRPCPool.GetUsed()
-                    idle := gRPCPool.GetIdle()
-                    fmt.Printf("(used:%d, idle:%d, finish:%d, poolfailed:%d, callfailed:%d) %s\n", used, idle, finishRequests, numPoolFailedRequests, numCallFailedRequests, res.Text)
-                }
+        } else {
+            gRPCPool.Put(gRPCConn)
+            if needTick(finishRequests) {
+                used := gRPCPool.GetUsed()
+                idle := gRPCPool.GetIdle()
+                fmt.Printf("(used:%d, idle:%d, finish:%d, poolfailed:%d, callfailed:%d) %s\n", used, idle, finishRequests, numPoolFailedRequests, numCallFailedRequests, res.Text)
             }
         }
     }
