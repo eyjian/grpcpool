@@ -2,6 +2,7 @@
 package main
 
 import (
+    "bufio"
     "context"
     "flag"
     "fmt"
@@ -63,6 +64,11 @@ func main() {
     } else {
         fmt.Printf("QPS: %d (Num: %d, Seconds: %d, PoolFailed: %d, CallFailed: %d) *\n", 0, numFinishRequests, s, numPoolFailedRequests, numCallFailedRequests)
     }
+
+    fmt.Printf("\nPress ENTER to exit.\n")
+    reader := bufio.NewReader(os.Stdin)
+    reader.ReadString('\n')
+    os.Exit(0)
 }
 
 func requestCoroutine(index int) {
