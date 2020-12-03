@@ -62,6 +62,8 @@ type GRPCPool struct {
 	initSize int32          // 连接池初始连接数
 	used     int32          // 已用连接数
 	idle     int32          // 空闲连接数（即在 clients 中的连接数）
+	idleTimeout int32       // 空闲连接超时时长（单位：秒，默认值 10，可调用成员函数 SetIdleTimeout 修改）
+	peakTimeout int32       // 高峰连接超时时长（单位：秒，默认值 1，可调用成员函数 SetPeakTimeout 修改，应不小于 idleTimeout 的值）
 	clients  chan *GRPCConn // gRPC 连接队列
 	dialOpts []grpc.DialOption
 }
@@ -143,6 +145,8 @@ func NewGRPCPool(endpoint string, initSize, idleSize, peakSize int32, dialOpts .
 	}
 	grpcPool.used = 0
 	grpcPool.idle = 0
+	grpcPool.idleTimeout = 10
+	grpcPool.peakTimeout = 1
 	grpcPool.clients = make(chan *GRPCConn, grpcPool.peakSize) // 在成员函数 Destroy 中释放
 	grpcPool.dialOpts = make([]grpc.DialOption, len(dialOpts))
 	if len(dialOpts) > 0 {
@@ -160,6 +164,22 @@ func NewGRPCPool(endpoint string, initSize, idleSize, peakSize int32, dialOpts .
 		grpcPool.dialOpts = append(grpcPool.dialOpts, grpc.WithInsecure())
 	}
 	return grpcPool
+}
+
+func (this *GRPCPool) SetIdleTimeout(timeout int32) {
+	if timeout < 1 {
+		this.idleTimeout = 1
+	} else {
+		this.idleTimeout = timeout
+	}
+}
+
+func (this *GRPCPool) SetPeakTimeout(timeout int32) {
+	if timeout < 1 {
+		this.peakTimeout = 1
+	} else {
+		this.peakTimeout = timeout
+	}
 }
 
 func (this *GRPCConn) GetEndpoint() string {
@@ -281,7 +301,7 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 
 			if now > utime {
 				itime := now - utime // idle time
-				if itime > 10 {
+				if itime > int64(this.idleTimeout) {
 					conn.Close()
 					this.subIdle()
 					if metricObserver != nil {
@@ -290,7 +310,7 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 					return POOL_IDLE, nil
 				}
 				if idle > this.GetIdleSize() {
-					if itime > 1 {
+					if itime > int64(this.peakTimeout) {
 						conn.Close()
 						this.subIdle()
 						if metricObserver != nil {
@@ -302,7 +322,7 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 			}
 		}
 		select {
-		case this.clients <- conn:
+		case this.clients <- conn: // 放回连接池
 			if metricObserver != nil {
 				metricObserver.IncPutSuccess()
 			}
