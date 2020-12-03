@@ -87,23 +87,23 @@ type Metric struct {
 
 // 度量数据观察者，方便外部获取连接数等
 type MetricObserver interface {
-	DecUsed() // 被使用连接数减一（不在池中数）
-	DecIdle() // 空闲数连接减一（在池中数）
-	IncUsed() // 被使用数增一（不在池中数）
-	IncIdle() // 空闲数增一（在池中数）
+	DecUsed() int32 // 被使用连接数减一（不在池中数）
+	DecIdle() int32 // 空闲数连接减一（在池中数）
+	IncUsed() int32 // 被使用数增一（不在池中数）
+	IncIdle() int32 // 空闲数增一（在池中数）
 
-	IncDialRefused() // gRPC 拨号拒绝数增一
-	IncDialTimeout() // gRPC 拨号超时数增一
-	IncDialSuccess() // gRPC 拨号成功数增一
-	IncDialError() // gRPC 拨号出错数增一（不包含拨号超时数和拒绝数）
+	IncDialRefused() int32 // gRPC 拨号拒绝数增一
+	IncDialTimeout() int32 // gRPC 拨号超时数增一
+	IncDialSuccess() int32 // gRPC 拨号成功数增一
+	IncDialError() int32 // gRPC 拨号出错数增一（不包含拨号超时数和拒绝数）
 
-	IncGetSuccess() // 取池成功数增一（不包含新拨号的成功数）
-	IncGetEmpty() // 取池空数增一
-	IncPutSuccess() // 还池成功数增一
-	IncPutFull() // 还池满数增一
-	IncPutClose() // 还池已关闭连接数增一
-	IncPutOld() // 还池空闲数增一（长时间未使用的）
-	IncPutIdle() // 还池空闲数增一（近期未使用的）
+	IncGetSuccess() int32 // 取池成功数增一（不包含新拨号的成功数）
+	IncGetEmpty() int32 // 取池空数增一
+	IncPutSuccess() int32 // 还池成功数增一
+	IncPutFull() int32 // 还池满数增一
+	IncPutClose() int32 // 还池已关闭连接数增一
+	IncPutOld() int32 // 还池空闲数增一（长时间未使用的）
+	IncPutIdle() int32 // 还池空闲数增一（近期未使用的）
 }
 
 func RegisterMetricObserver(mo MetricObserver) {
