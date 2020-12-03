@@ -32,6 +32,7 @@ var (
     wg sync.WaitGroup
     numPendingRequests int32 // 未完成的请求数
     numFinishRequests int32 // 完成的请求数
+    numSuccessRequests int32 // 成功的请求数
     numCallFailedRequests int32 // 调用失败数
     numPoolFailedRequests int32 // 取池失败数
 )
@@ -61,9 +62,9 @@ func main() {
     s := int(consumeDuration.Seconds())
     if s > 0 {
         qps := int(numFinishRequests) / s
-        fmt.Printf("QPS: %d (Num: %d, Seconds: %d, PoolFailed: %d, CallFailed: %d)\n", qps, numFinishRequests, s, numPoolFailedRequests, numCallFailedRequests)
+        fmt.Printf("QPS: %d (Total: %d, Seconds: %d, Success: %d, PoolFailed: %d, CallFailed: %d)\n", qps, numFinishRequests, s, numSuccessRequests, numPoolFailedRequests, numCallFailedRequests)
     } else {
-        fmt.Printf("QPS: %d (Num: %d, Seconds: %d, PoolFailed: %d, CallFailed: %d) *\n", 0, numFinishRequests, s, numPoolFailedRequests, numCallFailedRequests)
+        fmt.Printf("QPS: %d (Total: %d, Seconds: %d, Success: %d, PoolFailed: %d, CallFailed: %d) *\n", 0, numFinishRequests, s, numSuccessRequests, numPoolFailedRequests, numCallFailedRequests)
     }
 
     fmt.Printf("\nPress ENTER to exit.\n")
@@ -109,6 +110,7 @@ func request(index int, finishRequests int32) {
             }
         } else {
             gRPCPool.Put(gRPCConn)
+            atomic.AddInt32(&numSuccessRequests, 1)
             if needTick(finishRequests) {
                 used := gRPCPool.GetUsed()
                 idle := gRPCPool.GetIdle()
