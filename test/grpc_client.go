@@ -2,7 +2,6 @@
 package main
 
 import (
-    "bufio"
     "context"
     "flag"
     "fmt"
@@ -24,12 +23,14 @@ var (
 
     numRequests = flag.Uint("n", 1, "Number of requests to perform.")
     numConcurrency = flag.Uint("c", 1, "Number of multiple requests to make at a time.")
-    tick = flag.Uint("tick", 10000, "Tick number to print.")
+    tick = flag.Uint("tick", 0, "Tick number to print, example: -tick=10000.")
     timeout = flag.Uint("timeout", 1000, "Timeout in milliseconds.")
 )
 var (
     gRPCPool *grpcpool.GRPCPool
     wg sync.WaitGroup
+    stopChan chan bool
+
     numPendingRequests int32 // 未完成的请求数
     numFinishRequests int32 // 完成的请求数
     numSuccessRequests int32 // 成功的请求数
@@ -50,6 +51,7 @@ func main() {
         os.Exit(1)
     }
 
+    stopChan = make(chan bool)
     gRPCPool = grpcpool.NewGRPCPool(*server, int32(*initSize), int32(*idleSize), int32(*peakSize))
     numPendingRequests = int32(*numRequests)
     wg.Add(int(*numConcurrency))
@@ -57,7 +59,13 @@ func main() {
     for i:=0; i<int(*numConcurrency); i++ {
         go requestCoroutine(i)
     }
+    if *tick == 0 {
+        go metricCoroutine()
+    }
+
+    // 等待结束
     wg.Wait()
+    stopChan <-true
     consumeDuration := time.Since(startTime)
     s := int(consumeDuration.Seconds())
     if s > 0 {
@@ -66,11 +74,60 @@ func main() {
     } else {
         fmt.Printf("QPS: %d (Total: %d, Seconds: %d, Success: %d, PoolFailed: %d, CallFailed: %d) *\n", 0, numFinishRequests, s, numSuccessRequests, numPoolFailedRequests, numCallFailedRequests)
     }
+}
 
-    fmt.Printf("\nPress ENTER to exit.\n")
-    reader := bufio.NewReader(os.Stdin)
-    reader.ReadString('\n')
-    os.Exit(0)
+func metricCoroutine() {
+    var defaultMetricObserver grpcpool.DefaultMetricObserver
+    grpcpool.RegisterMetricObserver(&defaultMetricObserver)
+
+    for ;; {
+        select {
+        case <-stopChan:
+            return
+        case <-time.After(time.Second*2): // 每隔 2 秒打点一次
+            break
+        }
+
+        used := defaultMetricObserver.GetUsed()
+        idle := defaultMetricObserver.GetIdle()
+        dialRefused := defaultMetricObserver.ZeroDialRefused()
+        dialTimeout := defaultMetricObserver.ZeroDialTimeout()
+        dialSuccess := defaultMetricObserver.ZeroDialSuccess()
+        dialError := defaultMetricObserver.ZeroDialError()
+        getSuccess := defaultMetricObserver.ZeroGetSuccess()
+        getEmpty := defaultMetricObserver.ZeroGetEmpty()
+        putSuccess := defaultMetricObserver.ZeroPutSuccess()
+        putFull := defaultMetricObserver.ZeroPutFull()
+        putClose := defaultMetricObserver.ZeroPutClose()
+        putOld := defaultMetricObserver.ZeroPutOld()
+        putIdle := defaultMetricObserver.ZeroPutIdle()
+        fmt.Printf("Used:%d," +
+            "Idle:%d," +
+            "DialRefused:%d," +
+            "DialTimeout:%d," +
+            "DialSuccess:%d," +
+            "DialError:%d," +
+            "GetSuccess:%d," +
+            "GetEmpty:%d," +
+            "PutSuccess:%d," +
+            "PutFull:%d," +
+            "PutClose:%d," +
+            "PutOld:%d," +
+            "PutIdle:%d\n",
+            used,
+            idle,
+            dialRefused,
+            dialTimeout,
+            dialSuccess,
+            dialError,
+            getSuccess,
+            getEmpty,
+            putSuccess,
+            putFull,
+            putClose,
+            putOld,
+            putIdle)
+    }
 }
 
 func requestCoroutine(index int) {
@@ -123,12 +180,8 @@ func request(index int, finishRequests int32) {
 func needTick(n int32) bool {
     var need bool
 
-    if *tick <= 0 {
-        if n % 10000 == 0 {
-            need = true
-        } else {
-            need = false
-        }
+    if *tick == 0 {
+        need = false
     } else {
         if n % int32(*tick) == 0 {
             need = true
