@@ -25,6 +25,7 @@ var (
     numRequests = flag.Uint("n", 1, "Number of requests to perform.")
     numConcurrency = flag.Uint("c", 1, "Number of multiple requests to make at a time.")
     tick = flag.Uint("tick", 10000, "Tick number to print.")
+    timeout = flag.Uint("timeout", 1000, "Timeout in milliseconds.")
 )
 var (
     gRPCPool *grpcpool.GRPCPool
@@ -85,7 +86,7 @@ func requestCoroutine(index int) {
 }
 
 func request(index int, finishRequests int32) {
-    ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(1*time.Second))
+    ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second * time.Duration(*timeout)))
     defer cancel()
 
     gRPCConn, errcode, err := gRPCPool.Get(ctx)
