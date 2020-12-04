@@ -7,6 +7,7 @@ import (
     "fmt"
     "os"
     "runtime/pprof"
+    "runtime/trace"
     "sync"
     "sync/atomic"
     "time"
@@ -50,10 +51,11 @@ func main() {
         flag.Usage()
         os.Exit(1)
     }
+    // pprof
     profFilename := "grpc_client.prof"
     profFile, err := os.Create(profFilename)
     if err != nil {
-        fmt.Printf("Create %s failed: %s.\n", profFilename, err.Error())
+        fmt.Printf("Create prof://%s failed: %s.\n", profFilename, err.Error())
         os.Exit(1)
     } else {
         // yum -y install graphviz
@@ -61,8 +63,20 @@ func main() {
         // 进入 pprof 后，执行 svg 命令生成 svg 格式图片文件，
         // 执行命令 top10 可查看 CPU 占用最多的前 10 个函数调用。
         pprof.StartCPUProfile(profFile)
-        profFile.Close()
+        defer profFile.Close()
         defer pprof.StopCPUProfile()
+    }
+    // trace
+    // go tool trace -http=:8080 grpc_client.trace
+    traceFilename := "grpc_client.trace"
+    traceFile, err := os.Create(traceFilename)
+    if err != nil {
+        fmt.Printf("Create trace://%s failed: %s.\n", traceFilename, err.Error())
+        os.Exit(1)
+    } else {
+        trace.Start(traceFile)
+        defer traceFile.Close()
+        defer trace.Stop()
     }
 
     stopChan = make(chan bool)
