@@ -30,7 +30,7 @@ func main() {
         os.Exit(1)
     }
 
-    fmt.Printf("gRPC listen on %d\n", *port)
+    fmt.Printf("gRPC listen on %d, PID is %d\n", *port, os.Getpid())
     server := grpc.NewServer()
     RegisterHelloServiceServer(server, &gRPCHandler{})
     err = server.Serve(listen)
