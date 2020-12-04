@@ -6,6 +6,7 @@ import (
     "flag"
     "fmt"
     "os"
+    "runtime/pprof"
     "sync"
     "sync/atomic"
     "time"
@@ -44,11 +45,24 @@ func main() {
         flag.Usage()
         os.Exit(1)
     }
-
     if *server == "" {
         fmt.Printf("Parameter[-server] is not set.\n")
         flag.Usage()
         os.Exit(1)
+    }
+    profFilename := "grpc_client.prof"
+    profFile, err := os.Create(profFilename)
+    if err != nil {
+        fmt.Printf("Create %s failed: %s.\n", profFilename, err.Error())
+        os.Exit(1)
+    } else {
+        // yum -y install graphviz
+        // go tool pprof grpc_client grpc_client.prof
+        // 进入 pprof 后，执行 svg 命令生成 svg 格式图片文件，
+        // 执行命令 top10 可查看 CPU 占用最多的前 10 个函数调用。
+        pprof.StartCPUProfile(profFile)
+        profFile.Close()
+        defer pprof.StopCPUProfile()
     }
 
     stopChan = make(chan bool)
