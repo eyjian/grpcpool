@@ -58,10 +58,20 @@ func main() {
         fmt.Printf("Create prof://%s failed: %s.\n", profFilename, err.Error())
         os.Exit(1)
     } else {
-        // yum -y install graphviz
+        // 生成 svg 图形文件依赖 graphviz，
+        // 安装 graphviz 的命令：yum -y install graphviz
+        //
         // go tool pprof grpc_client grpc_client.prof
         // 进入 pprof 后，执行 svg 命令生成 svg 格式图片文件，
         // 执行命令 top10 可查看 CPU 占用最多的前 10 个函数调用。
+        //
+        // 如果需要生成火焰图，则需先安装火焰图工具 go-torch，
+        // 安装 go-torch 的命令：go get -v github.com/uber/go-torch
+        //
+        // 生成 CPU 火焰图：
+        // go-torch -u http://127.0.0.1:8080  --seconds 60 -f cpu.svg
+        // 生成内存火焰图：
+        // go-torch  http://127.0.0.1:8080/debug/pprof/heap --colors mem -f mem.svg
         pprof.StartCPUProfile(profFile)
         defer profFile.Close()
         defer pprof.StopCPUProfile()
