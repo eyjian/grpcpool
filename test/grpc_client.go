@@ -78,6 +78,13 @@ func main() {
     }
     // trace
     // go tool trace -http=:8080 grpc_client.trace
+    //
+    // 启动时的 DEBUG：
+    // GODEBUG=schedtrace=1000 ./grpc_client # 每隔 1 秒打点一次
+    // 更详细数据输出：
+    // GODEBUG=schedtrace=1000,scheddetail=1 ./grpc_client
+    // GODEBUG=gctrace=1 ./grpc_client
+    // GODEBUG=gctrace=1,schedtrace=1000 ./grpc_client
     traceFilename := "grpc_client.trace"
     traceFile, err := os.Create(traceFilename)
     if err != nil {
