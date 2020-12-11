@@ -5,6 +5,7 @@ import (
     "context"
     "flag"
     "fmt"
+    "google.golang.org/grpc"
     "os"
     "runtime/pprof"
     "runtime/trace"
@@ -27,6 +28,8 @@ var (
     numConcurrency = flag.Uint("c", 1, "Number of multiple requests to make at a time.")
     tick = flag.Uint("tick", 0, "Tick number to print, example: -tick=10000.")
     timeout = flag.Uint("timeout", 1000, "Timeout in milliseconds.")
+
+    printInterceptor = flag.Bool("print_interceptor", false, "Print interceptor information.")
 )
 var (
     gRPCPool *grpcpool.GRPCPool
@@ -51,6 +54,8 @@ func main() {
         flag.Usage()
         os.Exit(1)
     }
+    fmt.Printf("PID is %d\n", os.Getpid())
+
     // pprof
     profFilename := "grpc_client.prof"
     profFile, err := os.Create(profFilename)
@@ -97,7 +102,14 @@ func main() {
     }
 
     stopChan = make(chan bool)
-    gRPCPool = grpcpool.NewGRPCPool(*server, int32(*initSize), int32(*idleSize), int32(*peakSize))
+    gRPCPool = grpcpool.NewGRPCPool(
+        *server,
+        int32(*initSize),
+        int32(*idleSize),
+        int32(*peakSize),
+        grpc.WithBlock(),
+        grpc.WithInsecure(),
+        grpc.WithChainUnaryInterceptor(unaryClientInterceptor))
     numPendingRequests = int32(*numRequests)
     wg.Add(int(*numConcurrency))
     startTime := time.Now()
@@ -142,42 +154,45 @@ func metricCoroutine() {
         dialError := defaultMetricObserver.ZeroDialError()
         getSuccess := defaultMetricObserver.ZeroGetSuccess()
         getEmpty := defaultMetricObserver.ZeroGetEmpty()
-        putSuccess := defaultMetricObserver.ZeroPutSuccess()
-        putFull := defaultMetricObserver.ZeroPutFull()
-        putClose := defaultMetricObserver.ZeroPutClose()
-        putOld := defaultMetricObserver.ZeroPutOld()
-        putIdle := defaultMetricObserver.ZeroPutIdle()
-        fmt.Printf("Used:%d," +
-            "Idle:%d," +
-            "DialRefused:%d," +
-            "DialTimeout:%d," +
-            "DialSuccess:%d," +
-            "DialError:%d," +
-            "GetSuccess:%d," +
-            "GetEmpty:%d," +
-            "PutSuccess:%d," +
-            "PutFull:%d," +
-            "PutClose:%d," +
-            "PutOld:%d," +
-            "PutIdle:%d\n",
-            used,
-            idle,
-            dialRefused,
-            dialTimeout,
-            dialSuccess,
-            dialError,
-            getSuccess,
-            getEmpty,
-            putSuccess,
-            putFull,
-            putClose,
-            putOld,
-            putIdle)
+
+        if getSuccess > 0 || getEmpty > 0 || dialSuccess > 0 || dialRefused > 0 || dialTimeout > 0 || dialError > 0 {
+            putSuccess := defaultMetricObserver.ZeroPutSuccess()
+            putFull := defaultMetricObserver.ZeroPutFull()
+            putClose := defaultMetricObserver.ZeroPutClose()
+            putOld := defaultMetricObserver.ZeroPutOld()
+            putIdle := defaultMetricObserver.ZeroPutIdle()
+            fmt.Printf("Used:%d,"+
+                "Idle:%d,"+
+                "DialRefused:%d,"+
+                "DialTimeout:%d,"+
+                "DialSuccess:%d,"+
+                "DialError:%d,"+
+                "GetSuccess:%d,"+
+                "GetEmpty:%d,"+
+                "PutSuccess:%d,"+
+                "PutFull:%d,"+
+                "PutClose:%d,"+
+                "PutOld:%d,"+
+                "PutIdle:%d\n",
+                used,
+                idle,
+                dialRefused,
+                dialTimeout,
+                dialSuccess,
+                dialError,
+                getSuccess,
+                getEmpty,
+                putSuccess,
+                putFull,
+                putClose,
+                putOld,
+                putIdle)
+        }
     }
 }
 
 func requestCoroutine(index int) {
-    defer wg.Add(-1)
+    defer wg.Done() // 等同于 defer wg.Add(-1)
 
     for i:=0;;i++ {
         n := atomic.AddInt32(&numPendingRequests, -1)
@@ -190,7 +205,7 @@ func requestCoroutine(index int) {
 }
 
 func request(index int, finishRequests int32) {
-    ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second * time.Duration(*timeout)))
+    ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond * time.Duration(*timeout)))
     defer cancel()
 
     gRPCConn, errcode, err := gRPCPool.Get(ctx)
@@ -237,4 +252,17 @@ func needTick(n int32) bool {
     }
 
     return need
+}
+
+// 拦截器
+func unaryClientInterceptor(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+    helloReq, ok := req.(*HelloReq)
+    if *printInterceptor {
+        if ok {
+            fmt.Printf("FullMethod: %s with text: %s\n", method, helloReq.Text)
+        } else {
+            fmt.Printf("FullMethod: %s\n", method)
+        }
+    }
+    return invoker(ctx, method, req, reply, cc, opts...)
 }
