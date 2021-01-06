@@ -28,21 +28,22 @@ const (
 	POOL_EMPTY  = 1 // 连接池空的
 	POOL_FULL   = 2 // 连接池已满
 	POOL_IDLE   = 3 // 连接池空闲了
-	GRPC_ERROR  = 4 // 其它 gRPC 错误
-	CONN_CLOSED = 5 // 连接已关闭
+	POOL_CLOSED = 4 // 连接池已被关闭
+	GRPC_ERROR  = 5 // 其它 gRPC 错误
+	CONN_CLOSED = 6 // 连接已关闭
 
 	// Unavailable indicates the service is currently unavailable.
 	// This is a most likely a transient condition and may be corrected
 	// by retrying with a backoff. Note that it is not always safe to retry
 	// non-idempotent operations.
-	CONN_UNAVAILABLE = 6 // 连接被拒绝
+	CONN_UNAVAILABLE = 7 // 连接被拒绝
 
 	// DeadlineExceeded means operation expired before completion.
 	// For operations that change the state of the system, this error may be
 	// returned even if the operation has completed successfully. For
 	// example, a successful response from a server could have been delayed
 	// long enough for the deadline to expire.
-	CONN_DEADLINE_EXCEEDED = 7 // 连接超时
+	CONN_DEADLINE_EXCEEDED = 8 // 连接超时
 )
 
 // gRPC 连接
