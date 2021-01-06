@@ -64,6 +64,7 @@ type GRPCPool struct {
 	idle     int32          // 空闲连接数（即在 clients 中的连接数）
 	idleTimeout int32       // 空闲连接超时时长（单位：秒，默认值 10，可调用成员函数 SetIdleTimeout 修改）
 	peakTimeout int32       // 高峰连接超时时长（单位：秒，默认值 1，可调用成员函数 SetPeakTimeout 修改，应不小于 idleTimeout 的值）
+	closed      int32       // 关闭池
 	clients  chan *GRPCConn // gRPC 连接队列
 	dialOpts []grpc.DialOption
 }
@@ -147,6 +148,7 @@ func NewGRPCPool(endpoint string, initSize, idleSize, peakSize int32, dialOpts .
 	grpcPool.idle = 0
 	grpcPool.idleTimeout = 10
 	grpcPool.peakTimeout = 1
+	grpcPool.closed = 0
 	grpcPool.clients = make(chan *GRPCConn, grpcPool.peakSize) // 在成员函数 Destroy 中释放
 	grpcPool.dialOpts = make([]grpc.DialOption, len(dialOpts))
 	if len(dialOpts) > 0 {
@@ -164,6 +166,32 @@ func NewGRPCPool(endpoint string, initSize, idleSize, peakSize int32, dialOpts .
 		grpcPool.dialOpts = append(grpcPool.dialOpts, grpc.WithInsecure())
 	}
 	return grpcPool
+}
+
+func (this *GRPCPool) Close() {
+	swapped := atomic.CompareAndSwapInt32(&this.closed, 0, 1)
+	if swapped {
+		closed := false
+
+		LOOP: for {
+			select {
+			case conn := <-this.clients:
+				if conn == nil {
+					break LOOP
+				}
+				conn.Close()
+			default:
+				break LOOP
+			}
+		}
+		if !closed {
+			close(this.clients)
+			closed = true
+			goto LOOP
+		}
+
+		this.clients = nil
+	}
 }
 
 func (this *GRPCPool) SetIdleTimeout(timeout int32) {
@@ -284,6 +312,21 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 // 连接用完后归还回池，应和 Get 一对一成对调用
 // 约束：同一 conn 不应同时被多个协程使用
 func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
+	defer func() {
+		if err := recover(); err != nil {
+			conn.Close()
+			this.subIdle()
+		}
+	}()
+
+	closed := atomic.LoadInt32(&this.closed)
+	if closed == 1 {
+		if !conn.IsClosed() {
+			conn.Close()
+		}
+		return SUCCESS, nil
+	}
+
 	used := this.subUsed()
 	if conn.IsClosed() {
 		// 已关闭的不再放回池
@@ -322,7 +365,7 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 			}
 		}
 		select {
-		case this.clients <- conn: // 放回连接池
+		case this.clients <- conn: // 放回连接池，如果 clients 已 closed 则会 panic。
 			if metricObserver != nil {
 				metricObserver.IncPutSuccess()
 			}

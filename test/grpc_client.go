@@ -124,6 +124,7 @@ func main() {
     wg.Wait()
     stopChan <-true
     close(stopChan)
+    gRPCPool.Close()
     consumeDuration := time.Since(startTime)
     s := int(consumeDuration.Seconds())
     if s > 0 {
