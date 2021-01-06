@@ -119,6 +119,10 @@ type DefaultMetricObserver struct {
 // Example:
 // var defaultMetricObserver grpcpool.DefaultMetricObserver
 // grpcpool.RegisterMetricObserver(defaultMetricObserver)
+//
+// 注意：
+// 应在工作协程启动之前调用 RegisterMetricObserver，
+// 否则会出现 metric 的 used 计数出错负值。
 func RegisterMetricObserver(mo MetricObserver) {
 	metricObserver = mo
 }
