@@ -32,6 +32,7 @@ var (
     printInterceptor = flag.Bool("print_interceptor", false, "Print interceptor information.")
 )
 var (
+    defaultMetricObserver grpcpool.DefaultMetricObserver
     gRPCPool *grpcpool.GRPCPool
     wg sync.WaitGroup
     stopChan chan bool
@@ -112,6 +113,7 @@ func main() {
         grpc.WithChainUnaryInterceptor(unaryClientInterceptor))
     numPendingRequests = int32(*numRequests)
     wg.Add(int(*numConcurrency))
+    grpcpool.RegisterMetricObserver(&defaultMetricObserver)
     startTime := time.Now()
     for i:=0; i<int(*numConcurrency); i++ {
         go requestCoroutine(i)
@@ -122,6 +124,7 @@ func main() {
 
     // 等待结束
     wg.Wait()
+    time.Sleep(time.Duration(2)*time.Second)
     stopChan <-true
     close(stopChan)
     gRPCPool.Close()
@@ -136,9 +139,6 @@ func main() {
 }
 
 func metricCoroutine() {
-    var defaultMetricObserver grpcpool.DefaultMetricObserver
-    grpcpool.RegisterMetricObserver(&defaultMetricObserver)
-
     for ;; {
         select {
         case <-stopChan:

@@ -329,6 +329,7 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 		}
 	}()
 
+	used := this.subUsed()
 	closed := atomic.LoadInt32(&this.closed)
 	if closed == 1 {
 		if !conn.IsClosed() {
@@ -336,8 +337,6 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 		}
 		return SUCCESS, nil
 	}
-
-	used := this.subUsed()
 	if conn.IsClosed() {
 		// 已关闭的不再放回池
 		if metricObserver != nil {
