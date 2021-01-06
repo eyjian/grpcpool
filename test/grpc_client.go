@@ -27,7 +27,7 @@ var (
     numRequests = flag.Uint("n", 1, "Number of requests to perform.")
     numConcurrency = flag.Uint("c", 1, "Number of multiple requests to make at a time.")
     tick = flag.Uint("tick", 0, "Tick number to print, example: -tick=10000.")
-    timeout = flag.Uint("timeout", 1000, "Timeout in milliseconds.")
+    timeout = flag.Uint("timeout", 2000, "Timeout in milliseconds.")
 
     printInterceptor = flag.Bool("print_interceptor", false, "Print interceptor information.")
 )
@@ -124,11 +124,11 @@ func main() {
 
     // 等待结束
     wg.Wait()
-    time.Sleep(time.Duration(2)*time.Second)
+    consumeDuration := time.Since(startTime)
+    time.Sleep(time.Duration(12)*time.Second)
     stopChan <-true
     close(stopChan)
     gRPCPool.Close()
-    consumeDuration := time.Since(startTime)
     s := int(consumeDuration.Seconds())
     if s > 0 {
         qps := int(numFinishRequests) / s

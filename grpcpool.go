@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -67,6 +68,7 @@ type GRPCPool struct {
 	peakTimeout int32       // 高峰连接超时时长（单位：秒，默认值 1，可调用成员函数 SetPeakTimeout 修改，应不小于 idleTimeout 的值）
 	closed      int32       // 关闭池
 	accessTime  int64       // 最近一次调用 Get 或 Put 的时间，通过它可以判定是否还活跃着
+	wg sync.WaitGroup // 等待 releaseIdleCoroutine 退出
 	clients  chan *GRPCConn // gRPC 连接队列
 	dialOpts []grpc.DialOption
 }
@@ -153,7 +155,7 @@ func NewGRPCPool(endpoint string, initSize, idleSize, peakSize int32, dialOpts .
 	grpcPool.used = 0
 	grpcPool.idle = 0
 	grpcPool.idleTimeout = 10
-	grpcPool.peakTimeout = 1
+	grpcPool.peakTimeout = 2
 	grpcPool.closed = 0
 	grpcPool.clients = make(chan *GRPCConn, grpcPool.peakSize) // 在成员函数 Destroy 中释放
 	grpcPool.dialOpts = make([]grpc.DialOption, len(dialOpts))
@@ -171,6 +173,8 @@ func NewGRPCPool(endpoint string, initSize, idleSize, peakSize int32, dialOpts .
 		grpcPool.dialOpts = append(grpcPool.dialOpts, grpc.WithBlock())
 		grpcPool.dialOpts = append(grpcPool.dialOpts, grpc.WithInsecure())
 	}
+	grpcPool.wg.Add(1)
+	go grpcPool.releaseIdleCoroutine()
 	return grpcPool
 }
 
@@ -241,6 +245,9 @@ func (this *GRPCPool) Close() {
 
 		this.clients = nil
 	}
+
+	// 等待 releaseIdleCoroutine 退出
+	this.wg.Wait()
 }
 
 // 从连接池取一个连接，
@@ -250,6 +257,10 @@ func (this *GRPCPool) Close() {
 // 2) 错误代码
 // 3) 错误信息
 func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
+	return this.get(ctx, false)
+}
+
+func (this *GRPCPool) get(ctx context.Context, doNotNew bool) (*GRPCConn, uint32, error) {
 	accessTime := time.Now().Unix()
 	atomic.StoreInt64(&this.accessTime, accessTime)
 	used1 := this.addUsed()
@@ -262,6 +273,9 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 		}
 		return conn, SUCCESS, nil
 	default:
+		if doNotNew {
+			return nil, SUCCESS, nil
+		}
 		if used1 > this.GetPeakSize() {
 			used2 := this.subUsed()
 			if metricObserver != nil {
@@ -315,6 +329,10 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 // 连接用完后归还回池，应和 Get 一对一成对调用
 // 约束：同一 conn 不应同时被多个协程使用
 func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
+	return this.put(conn, false)
+}
+
+func (this *GRPCPool) put(conn *GRPCConn, doNotTouch bool) (uint, error) {
 	accessTime := time.Now().Unix()
 	atomic.StoreInt64(&this.accessTime, accessTime)
 	defer func() {
@@ -341,7 +359,9 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 	} else {
 		idle := this.addIdle()
 		utime := conn.utime.Unix()
-		conn.utime = time.Now()
+		if !doNotTouch {
+			conn.utime = time.Now()
+		}
 
 		if idle > this.GetInitSize() {
 			now := time.Now().Unix()
@@ -383,6 +403,35 @@ func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
 			return POOL_FULL, errors.New(fmt.Sprintf("pool for %s is full(used:%d, init:%d, idle:%d, peak:%d)", this.endpoint, used, this.GetInitSize(), this.GetIdleSize(), this.GetPeakSize()))
 		}
 	}
+}
+
+func (this *GRPCPool) releaseIdleCoroutine() {
+	for {
+		closed := atomic.LoadInt32(&this.closed)
+		if closed == 1 {
+			break
+		}
+
+		time.Sleep(time.Duration(1)*time.Second)
+		initSize := this.GetInitSize()
+		idleSize := this.GetIdle()
+		usedSize := this.GetUsed()
+		// 大量在使用时，表明正忙着
+		if idleSize > initSize && usedSize < idleSize {
+			for i:=0; i<int(idleSize); i++ {
+				conn, _, _ := this.get(context.Background(), true)
+				if conn == nil {
+					break
+				}
+				errcode, _ := this.put(conn, true)
+				if errcode != POOL_IDLE {
+					break
+				}
+			}
+		}
+	}
+
+	this.wg.Done()
 }
 
 func (this *GRPCPool) addUsed() int32 {
