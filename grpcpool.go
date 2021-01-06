@@ -174,32 +174,6 @@ func NewGRPCPool(endpoint string, initSize, idleSize, peakSize int32, dialOpts .
 	return grpcPool
 }
 
-func (this *GRPCPool) Close() {
-	swapped := atomic.CompareAndSwapInt32(&this.closed, 0, 1)
-	if swapped {
-		closed := false
-
-		LOOP: for {
-			select {
-			case conn := <-this.clients:
-				if conn == nil {
-					break LOOP
-				}
-				conn.Close()
-			default:
-				break LOOP
-			}
-		}
-		if !closed {
-			close(this.clients)
-			closed = true
-			goto LOOP
-		}
-
-		this.clients = nil
-	}
-}
-
 func (this *GRPCPool) GetAccessTime() int64 {
 	return atomic.LoadInt64(&this.accessTime)
 }
@@ -242,13 +216,30 @@ func (this *GRPCConn) IsClosed() bool {
 	return this.closed
 }
 
-// 销毁连接池（释放资源）
-func (this *GRPCPool) Destroy() {
-	close(this.clients)
-	clients := this.clients
-	this.clients = nil
-	for client := range clients {
-		client.Close()
+// 关闭连接池（释放资源）
+func (this *GRPCPool) Close() {
+	swapped := atomic.CompareAndSwapInt32(&this.closed, 0, 1)
+	if swapped {
+		closed := false
+
+	LOOP: for {
+		select {
+		case conn := <-this.clients:
+			if conn == nil {
+				break LOOP
+			}
+			conn.Close()
+		default:
+			break LOOP
+		}
+	}
+		if !closed {
+			close(this.clients)
+			closed = true
+			goto LOOP
+		}
+
+		this.clients = nil
 	}
 }
 
