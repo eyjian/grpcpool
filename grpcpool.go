@@ -65,6 +65,7 @@ type GRPCPool struct {
 	idleTimeout int32       // 空闲连接超时时长（单位：秒，默认值 10，可调用成员函数 SetIdleTimeout 修改）
 	peakTimeout int32       // 高峰连接超时时长（单位：秒，默认值 1，可调用成员函数 SetPeakTimeout 修改，应不小于 idleTimeout 的值）
 	closed      int32       // 关闭池
+	accessTime  int64       // 最近一次调用 Get 或 Put 的时间，通过它可以判定是否还活跃着
 	clients  chan *GRPCConn // gRPC 连接队列
 	dialOpts []grpc.DialOption
 }
@@ -194,6 +195,10 @@ func (this *GRPCPool) Close() {
 	}
 }
 
+func (this *GRPCPool) GetAccessTime() int64 {
+	return atomic.LoadInt64(&this.accessTime)
+}
+
 func (this *GRPCPool) SetIdleTimeout(timeout int32) {
 	if timeout < 1 {
 		this.idleTimeout = 1
@@ -249,6 +254,8 @@ func (this *GRPCPool) Destroy() {
 // 2) 错误代码
 // 3) 错误信息
 func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
+	accessTime := time.Now().Unix()
+	atomic.StoreInt64(&this.accessTime, accessTime)
 	used1 := this.addUsed()
 
 	select {
@@ -312,6 +319,8 @@ func (this *GRPCPool) Get(ctx context.Context) (*GRPCConn, uint32, error) {
 // 连接用完后归还回池，应和 Get 一对一成对调用
 // 约束：同一 conn 不应同时被多个协程使用
 func (this *GRPCPool) Put(conn *GRPCConn) (uint, error) {
+	accessTime := time.Now().Unix()
+	atomic.StoreInt64(&this.accessTime, accessTime)
 	defer func() {
 		if err := recover(); err != nil {
 			conn.Close()
