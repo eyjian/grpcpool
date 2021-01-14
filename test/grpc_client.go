@@ -78,6 +78,8 @@ func main() {
         // go-torch -u http://127.0.0.1:8080  --seconds 60 -f cpu.svg
         // 生成内存火焰图：
         // go-torch  http://127.0.0.1:8080/debug/pprof/heap --colors mem -f mem.svg
+        //
+        // Go1.1之前需借助 go-torch 生成火焰图，之后的“go tool pprof”已集成此功能。
         pprof.StartCPUProfile(profFile)
         defer profFile.Close()
         defer pprof.StopCPUProfile()
