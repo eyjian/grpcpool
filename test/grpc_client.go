@@ -5,13 +5,16 @@ import (
     "context"
     "flag"
     "fmt"
-    "google.golang.org/grpc"
     "os"
     "runtime/pprof"
     "runtime/trace"
     "sync"
     "sync/atomic"
     "time"
+)
+import (
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/connectivity"
 )
 import (
     "github.com/eyjian/grpcpool"
@@ -29,6 +32,7 @@ var (
     tick = flag.Uint("tick", 0, "Tick number to print, example: -tick=10000.")
     timeout = flag.Uint("timeout", 2000, "Timeout in milliseconds.")
 
+    withblock = flag.Bool("withblock", false, "gRPC dial to server withblock.")
     printInterceptor = flag.Bool("print_interceptor", false, "Print interceptor information.")
 )
 var (
@@ -105,14 +109,18 @@ func main() {
     }
 
     stopChan = make(chan bool)
+    var dialOpts []grpc.DialOption
+    if *withblock {
+        dialOpts = append(dialOpts, grpc.WithBlock())
+    }
+    dialOpts = append(dialOpts, grpc.WithInsecure())
+    dialOpts = append(dialOpts, grpc.WithChainUnaryInterceptor(unaryClientInterceptor))
     gRPCPool = grpcpool.NewGRPCPool(
         *server,
         int32(*initSize),
         int32(*idleSize),
         int32(*peakSize),
-        grpc.WithBlock(),
-        grpc.WithInsecure(),
-        grpc.WithChainUnaryInterceptor(unaryClientInterceptor))
+        dialOpts...)
     numPendingRequests = int32(*numRequests)
     wg.Add(int(*numConcurrency))
     grpcpool.RegisterMetricObserver(&defaultMetricObserver)
@@ -217,9 +225,24 @@ func request(index int, finishRequests int32) {
         fmt.Printf("Get a gRPC connection from pool failed: (%d)%s\n", errcode, err.Error())
     } else {
         grpcClient := gRPCConn.GetClient()
+        connState := grpcClient.GetState()
+        if connState == connectivity.Connecting {
+            fmt.Printf("%s is connecting\n", grpcClient.Target())
+            gRPCPool.Put(gRPCConn)
+            return
+        } else if connState == connectivity.TransientFailure {
+            fmt.Printf("%s is not connected: %s\n", grpcClient.Target(), connState.String())
+            gRPCConn.Close()
+            gRPCPool.Put(gRPCConn)
+            return
+        } else if connState != connectivity.Ready {
+            fmt.Printf("%s is not connected: %s\n", grpcClient.Target(), connState.String())
+            gRPCPool.Put(gRPCConn)
+            return
+        }
         helloClient := NewHelloServiceClient(grpcClient)
         in := HelloReq {
-            Text: "Hello",
+            Text: "Hello,Hello,Hello,Hello,Hello,Hello,Hello,Hello,Hello,Hello,Hello,Hello,Hello,Hello,Hello,Hello",
         }
         res, err := helloClient.Hello(ctx, &in)
         if err != nil {
@@ -227,7 +250,7 @@ func request(index int, finishRequests int32) {
             gRPCPool.Put(gRPCConn)
             atomic.AddInt32(&numCallFailedRequests, 1)
             if index == 0 {
-                fmt.Println(err)
+                fmt.Printf("Hello to %s failed: %s\n", grpcClient.Target(), err.Error())
             }
         } else {
             gRPCPool.Put(gRPCConn)
