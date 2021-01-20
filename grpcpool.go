@@ -170,7 +170,7 @@ func NewGRPCPool(endpoint string, initSize, idleSize, peakSize int32, dialOpts .
 		// grpc.WithDefaultCallOptions()
 		// grpc.WithResolvers()
 		// grpc.WithAuthority()
-		grpcPool.dialOpts = append(grpcPool.dialOpts, grpc.WithBlock())
+		//grpcPool.dialOpts = append(grpcPool.dialOpts, grpc.WithBlock())
 		grpcPool.dialOpts = append(grpcPool.dialOpts, grpc.WithInsecure())
 	}
 	grpcPool.wg.Add(1)
